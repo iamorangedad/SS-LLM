@@ -1,4 +1,4 @@
-"""运行两层秘密分享网络，并与明文前向对照。"""
+"""Run the secret-shared two-layer network and compare it with plaintext."""
 
 import sys
 
@@ -19,13 +19,13 @@ def run_example() -> None:
         name: dealer.share(network[name]) for name in ("x", "w1", "b1", "w2", "b2")
     }
 
-    print("两方秘密分享上的两层网络")
+    print("Two-party secret-shared two-layer network")
     print("h = (W1 @ x + b1) ** 2")
     print("y = W2 @ h + b2")
     print()
-    print("手算：z = [1*1 + 0*2, 1*1 + (-1)*2 + 1] = [1, 0]")
-    print("      h = [1, 0]")
-    print("      y = [2*1 + 3*0 + 4] = [6]")
+    print("By hand: z = [1*1 + 0*2, 1*1 + (-1)*2 + 1] = [1, 0]")
+    print("         h = [1, 0]")
+    print("         y = [2*1 + 3*0 + 4] = [6]")
     print()
 
     plaintext = forward(
@@ -36,20 +36,20 @@ def run_example() -> None:
     )
     opened = reveal(secure)
 
-    show("输入 x", network["x"])
-    show("参与方 0 持有的输入份额", [to_signed(v) for v in shared["x"].s0])
-    show("参与方 1 持有的输入份额", [to_signed(v) for v in shared["x"].s1])
-    print("单独一份份额是域上的均匀随机数，合并之前还原不出 x、权重或输出。")
+    show("input x", network["x"])
+    show("party 0 input share", [to_signed(v) for v in shared["x"].s0])
+    show("party 1 input share", [to_signed(v) for v in shared["x"].s1])
+    print("One share is uniform in the field. It does not reveal x, the weights, or the output.")
     print()
-    show("明文输出", plaintext)
-    show("参与方 0 持有的输出份额", [to_signed(v) for v in secure.s0])
-    show("客户端合并两份输出份额", opened)
-    print(f"乘法次数: {dealer.multiplications}")
+    show("plaintext output", plaintext)
+    show("party 0 output share", [to_signed(v) for v in secure.s0])
+    show("client opens both output shares", opened)
+    print(f"multiplications: {dealer.multiplications}")
 
     if [int(v) for v in opened] != [int(v) for v in plaintext]:
-        print("安全前向与明文不一致", file=sys.stderr)
+        print("secure forward does not match plaintext", file=sys.stderr)
         sys.exit(1)
-    print("安全前向与明文一致。")
+    print("Secure forward matches plaintext.")
 
 
 def run_random() -> None:
@@ -72,13 +72,13 @@ def run_random() -> None:
     )
     plaintext = forward(features, weight1, bias1, weight2, bias2)
     print()
-    print("随机小网络（输入 3，隐藏 4，输出 2）")
-    show("明文输出", plaintext)
-    show("秘密分享输出", opened)
+    print("Random small network (input 3, hidden 4, output 2)")
+    show("plaintext output", plaintext)
+    show("secret-shared output", opened)
     if [int(v) for v in opened] != [int(v) for v in plaintext]:
-        print("随机网络对照失败", file=sys.stderr)
+        print("random network comparison failed", file=sys.stderr)
         sys.exit(1)
-    print("随机网络对照一致。")
+    print("Random network matches.")
 
 
 if __name__ == "__main__":

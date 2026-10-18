@@ -1,19 +1,26 @@
-"""两方加法秘密分享上的两层神经网络。
+"""Two-layer neural network on two-party additive secret shares.
 
-这是一个最小、可核对的推理 demo，不是生产级多方计算库。
+This is a minimal, checkable inference demo, not a production MPC library.
+User documentation: README.md (English, primary) and README_CH.md.
 
-安全模型
-    半诚实、两方不串通。每一方只持有自己的份额，并看到 Beaver 乘法打开的掩码。
-    掩码由可信初始化方预先生成，初始化方不参与推理。
-    份额在素数域 2^61-1 上均匀抽取，单份与秘密信息论独立。
-    输入、权重、偏置和输出在协议结束前都不合并。输出只由客户端合并。
+Threat model
+    Semi-honest and non-colluding. Each party holds only its own share and
+    sees the Beaver masks that multiplication opens.
+    A trusted dealer samples those masks beforehand and does not take part
+    in inference.
+    Shares are uniform in the prime field 2^61-1, so one share is
+    information-theoretically independent of the secret.
+    Input, weights, biases, and output stay split until the client opens
+    the output.
 
-网络（整数算术）
+Network (integer arithmetic)
     h = (W1 @ x + b1) ** 2
     y = W2 @ h + b2
 
-平方是非线性，而且只需要乘法。ReLU 需要比较协议，超出这个最小实现。
-域足够大，demo 使用的小整数在计算过程中不会绕模，因此结果与普通整数前向一致。
+Square is a nonlinearity that needs only multiplication. ReLU needs a
+comparison protocol, which is outside this minimal implementation.
+The field is large enough that the demo's small integers do not wrap, so
+the result matches an ordinary integer forward pass.
 """
 
 from dataclasses import dataclass
@@ -25,7 +32,7 @@ PRIME = 2**61 - 1
 
 @dataclass
 class Shared:
-    """一个张量的两份份额。s0 归参与方 0，s1 归参与方 1。"""
+    """Two shares of one tensor. Party 0 holds s0 and party 1 holds s1."""
 
     s0: np.ndarray
     s1: np.ndarray
@@ -33,12 +40,12 @@ class Shared:
     @property
     def shape(self):
         if self.s0.shape != self.s1.shape:
-            raise ValueError("双方份额形状不一致")
+            raise ValueError("the two shares have different shapes")
         return self.s0.shape
 
 
 class Dealer:
-    """可信初始化方：只负责拆分秘密和发放乘法三元组。"""
+    """Trusted setup: split secrets and sample multiplication triples only."""
 
     def __init__(self, seed: int = 0):
         self.rng = np.random.default_rng(seed)
@@ -56,7 +63,7 @@ class Dealer:
 
 
 def field(values) -> np.ndarray:
-    """把整数张量规范化到域元素。负数按 Python 取模，变成对应的域元素。"""
+    """Encode an integer tensor as field elements. Negatives wrap via Python modulo."""
 
     array = np.asarray(values, dtype=object)
     encoded = [int(v) % PRIME for v in array.reshape(-1)]
@@ -71,7 +78,7 @@ def to_signed(value) -> int:
 
 
 def reveal(shared: Shared) -> np.ndarray:
-    """客户端合并两份份额。协议运行期间参与方不调用它。"""
+    """Client reconstruction. Parties do not call this during the protocol."""
 
     total = (shared.s0 + shared.s1) % PRIME
     signed = [to_signed(v) for v in np.asarray(total, dtype=object).reshape(-1)]
@@ -79,13 +86,13 @@ def reveal(shared: Shared) -> np.ndarray:
 
 
 def _party_mask(share: np.ndarray, triple_share: np.ndarray) -> np.ndarray:
-    """参与方本地计算将要打开的掩码份额。"""
+    """Local mask share that this party will open."""
 
     return (share - triple_share) % PRIME
 
 
 def _party_product(opened_e, opened_f, a, b, c, add_cross: bool) -> np.ndarray:
-    """参与方用公开掩码和自己的三元组份额完成本地乘法。"""
+    """Finish a local product from public masks and this party's triple share."""
 
     result = (c + opened_e * b + opened_f * a) % PRIME
     if add_cross:
@@ -94,10 +101,10 @@ def _party_product(opened_e, opened_f, a, b, c, add_cross: bool) -> np.ndarray:
 
 
 def multiply(left: Shared, right: Shared, dealer: Dealer) -> Shared:
-    """Beaver 乘法。双方唯一互相发送的是掩码份额，打开后得到 e、f。"""
+    """Beaver multiplication. The only values exchanged are mask shares, opened as e and f."""
 
     if left.shape != right.shape:
-        raise ValueError("相乘的两个份额形状必须相同")
+        raise ValueError("multiplied shares must have the same shape")
 
     shape = left.shape
     raw_a = dealer._uniform(shape)
@@ -125,7 +132,7 @@ def multiply(left: Shared, right: Shared, dealer: Dealer) -> Shared:
 
 def add(left: Shared, right: Shared) -> Shared:
     if left.shape != right.shape:
-        raise ValueError("相加的两个份额形状必须相同")
+        raise ValueError("added shares must have the same shape")
     return Shared((left.s0 + right.s0) % PRIME, (left.s1 + right.s1) % PRIME)
 
 
@@ -134,13 +141,13 @@ def square(value: Shared, dealer: Dealer) -> Shared:
 
 
 def matvec(weight: Shared, vector: Shared, dealer: Dealer) -> Shared:
-    """秘密分享下的矩阵乘向量。权重和向量都是份额。"""
+    """Matrix-vector product on shares. Both the matrix and the vector are shared."""
 
     if weight.s0.ndim != 2 or vector.s0.ndim != 1:
-        raise ValueError("matvec 需要 (输出, 输入) 矩阵和一维向量")
+        raise ValueError("matvec expects an (out, in) matrix and a 1-D vector")
     rows, cols = weight.shape
     if vector.shape != (cols,):
-        raise ValueError("矩阵列数必须等于向量长度")
+        raise ValueError("matrix width must equal the vector length")
 
     expanded = Shared(
         np.broadcast_to(vector.s0, (rows, cols)),
@@ -170,7 +177,7 @@ def secure_forward(
     bias2: Shared,
     dealer: Dealer,
 ) -> Shared:
-    """在份额上计算两层网络，不合并任何中间结果。"""
+    """Evaluate the two-layer network on shares without opening intermediates."""
 
     hidden_input = add(matvec(weight1, features, dealer), bias1)
     hidden = square(hidden_input, dealer)
@@ -178,7 +185,7 @@ def secure_forward(
 
 
 def forward(features, weight1, bias1, weight2, bias2) -> np.ndarray:
-    """同一网络的明文整数前向，用来对照安全计算的结果。"""
+    """Plaintext integer forward pass of the same network, for comparison."""
 
     features = [int(v) for v in np.asarray(features, dtype=object).reshape(-1)]
     weight1 = np.asarray(weight1, dtype=object)
@@ -187,9 +194,9 @@ def forward(features, weight1, bias1, weight2, bias2) -> np.ndarray:
     bias2 = [int(v) for v in np.asarray(bias2, dtype=object).reshape(-1)]
 
     if weight1.ndim != 2 or weight1.shape[1] != len(features):
-        raise ValueError("第一层权重形状与输入不符")
+        raise ValueError("first-layer weight shape does not match the input")
     if len(bias1) != weight1.shape[0]:
-        raise ValueError("第一层偏置长度与隐藏层不符")
+        raise ValueError("first-layer bias length does not match the hidden width")
 
     hidden = []
     for row, bias in zip(weight1, bias1):
@@ -199,9 +206,9 @@ def forward(features, weight1, bias1, weight2, bias2) -> np.ndarray:
         hidden.append(activation * activation)
 
     if weight2.ndim != 2 or weight2.shape[1] != len(hidden):
-        raise ValueError("第二层权重形状与隐藏层不符")
+        raise ValueError("second-layer weight shape does not match the hidden width")
     if len(bias2) != weight2.shape[0]:
-        raise ValueError("第二层偏置长度与输出不符")
+        raise ValueError("second-layer bias length does not match the output width")
 
     output = []
     for row, bias in zip(weight2, bias2):
@@ -213,7 +220,7 @@ def forward(features, weight1, bias1, weight2, bias2) -> np.ndarray:
 
 
 def example():
-    """手算例子：y = [6]。推导见 demo.py。"""
+    """Hand-checked example whose plaintext output is [6]. See README.md."""
 
     return {
         "x": [1, 2],
