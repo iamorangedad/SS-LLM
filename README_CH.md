@@ -1,54 +1,9 @@
-# 基于秘密分享协议的分布式大模型推理引擎
+# 秘密分享上的两层网络
 
-这是一个基于秘密分享协议的分布式大模型推理引擎服务，实现了安全的分布式计算。
+说明见 [README.md](README.md)。运行：
 
-## 核心特性
-
-- **秘密分享协议**: 输入数据被随机拆分成2份，分别在本地和云端计算
-- **分布式计算**: 本地和云端分别计算隐含层的embedding向量
-- **安全合并**: 在云端安全合并计算结果
-- **标准推理流程**: 后续流程与常见的大模型推理一致
-
-## 系统架构
-
-```
-用户输入 → 秘密分享 → 本地计算 → 云端计算 → 结果合并 → 最终输出
-```
-
-## 安装和运行
-
-1. 安装依赖：
 ```bash
 pip install -r requirements.txt
+python demo.py
+python test_ssnn.py
 ```
-
-2. 启动本地服务：
-```bash
-python local_server.py
-```
-
-3. 启动云端服务：
-```bash
-python cloud_server.py
-```
-
-4. 启动客户端：
-```bash
-python client.py
-```
-
-## 安全特性
-
-- 使用Shamir秘密分享协议
-- 数据在传输过程中加密
-- 本地和云端分别处理部分数据
-- 只有合并后的结果才暴露完整信息
-
-## 项目结构
-
-- `secret_sharing.py`: 秘密分享协议实现
-- `local_server.py`: 本地计算服务器
-- `cloud_server.py`: 云端计算服务器
-- `client.py`: 客户端接口
-- `model_utils.py`: 模型工具函数
-- `config.py`: 配置文件 

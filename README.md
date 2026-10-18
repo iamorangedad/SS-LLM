@@ -1,340 +1,42 @@
-# Distributed Large Language Model Inference Engine with Secret Sharing Protocol
+# 秘密分享上的两层网络
 
-A secure distributed inference engine for large language models that implements secret sharing protocols to protect data privacy during computation.
+一个最小 demo：两个互不串通的参与方，在加法秘密分享上完成一次两层网络前向。任意一方单独持有的份额还原不出输入、权重或输出。
 
-## 🚀 Features
-
-- **Secret Sharing Protocol**: Input data is randomly split into 2 shares using Shamir's secret sharing algorithm
-- **Distributed Computation**: Local and cloud servers process different shares of the data
-- **Secure Merging**: Results are securely combined in the cloud server
-- **Privacy Protection**: Individual shares cannot reconstruct the original data
-- **Standard Inference**: Follows standard large language model inference workflows
-- **Encrypted Communication**: Secure data transmission with key derivation and salt encryption
-
-## 🏗️ Architecture
-
-```
-User Input → Secret Sharing → Local Computation → Cloud Computation → Result Merging → Final Output
+```text
+h = (W1 @ x + b1) ** 2
+y = W2 @ h + b2
 ```
 
-### Core Components
+平方是这个实现里的非线性。它只需要乘法。ReLU 需要比较协议，没有放进这个最小版本。算术在素数域 `2^61-1` 上进行，demo 里的整数很小，结果与普通整数前向一致。
 
-1. **Secret Sharing Protocol** (`secret_sharing.py`)
-   - Implements Shamir's secret sharing algorithm
-   - Supports text and embedding splitting/reconstruction
-   - Provides secure communication utilities
-
-2. **Local Computation Server** (`local_server.py`)
-   - Processes one share of the secret data
-   - Runs on local environment
-   - Port: 8001
-
-3. **Cloud Computation Server** (`cloud_server.py`)
-   - Processes the other share of the secret data
-   - Handles result merging and final inference
-   - Port: 8002
-
-4. **Client Interface** (`client.py`)
-   - User-friendly interactive interface
-   - Supports distributed inference requests
-   - Monitors server status
-
-## 📦 Installation
-
-### Prerequisites
-
-- Python 3.8+
-- pip
-
-### Install Dependencies
+## 运行
 
 ```bash
 pip install -r requirements.txt
-```
-
-## 🚀 Quick Start
-
-### Method 1: Using the Startup Script (Recommended)
-
-```bash
-python start_system.py
-```
-
-### Method 2: Start Servers Separately
-
-```bash
-# Terminal 1: Start local server
-python local_server.py
-
-# Terminal 2: Start cloud server
-python cloud_server.py
-```
-
-### Use the Client
-
-```bash
-python client.py
-```
-
-### Run Tests
-
-```bash
-python test_system.py
-```
-
-### View Demo
-
-```bash
 python demo.py
+python test_ssnn.py
 ```
 
-## 🔧 Configuration
+`demo.py` 先跑一个可以手算的例子，明文结果是 `[6]`，再用一个随机小网络对照。
 
-### Environment Variables
+## 协议
 
-- `LOCAL_HOST` - Local server host address
-- `LOCAL_PORT` - Local server port
-- `CLOUD_HOST` - Cloud server host address
-- `CLOUD_PORT` - Cloud server port
-- `EMBEDDING_MODEL` - Embedding model name
-- `INFERENCE_MODEL` - Inference model name
-- `LOG_LEVEL` - Logging level
+- 客户端在本地把输入、两层权重和偏置拆成两份，每个参与方拿一份。
+- 加法在本地完成：双方把自己的份额相加。
+- 乘法使用 Beaver 三元组。双方只交换掩码后的 `e`、`f`，不交换秘密本身。
+- 矩阵乘向量由逐元素乘法和本地求和组成。
+- 输出份额交回客户端，只有客户端把两份相加。
 
-### Configuration File
+初始化方负责产生均匀份额和三元组，之后不参与推理。这里用程序里的 `Dealer` 模拟它。
 
-Main configuration is in `config.py`:
+这是半诚实模型：双方按协议计算，并且不会把份额凑到一起。形状是公开的。打开的 Beaver 掩码也是公开的，但在掩码均匀时不泄漏秘密。某一方如果篡改消息，这个 demo 检测不出来。
 
-```python
-# Server Configuration
-LOCAL_HOST = "localhost"
-LOCAL_PORT = 8001
-CLOUD_HOST = "localhost"
-CLOUD_PORT = 8002
+## 代码
 
-# Model Configuration
-EMBEDDING_MODEL = "bert-base-uncased"
-INFERENCE_MODEL = "gpt2"
+- `ssnn.py`：域运算、拆分、Beaver 乘法、两层前向
+- `demo.py`：手算例子和随机对照
+- `test_ssnn.py`：份额隐私、乘法、手算例子、20 组随机网络
 
-# Secret Sharing Configuration
-PRIME = 2**31 - 1
-SHARE_COUNT = 2
-```
+## English
 
-## 🔒 Security Features
-
-### 1. Data Privacy Protection
-
-- Input data is randomly split into 2 shares
-- Each share is sent to different servers
-- Individual shares cannot reconstruct original data
-- Only merging produces complete results
-
-### 2. Secure Communication
-
-- Encrypted communication protects data transmission
-- Key derivation and salt encryption
-- Protection against man-in-the-middle attacks
-
-### 3. Computational Isolation
-
-- Local and cloud servers process separate data portions
-- Isolated computation processes
-- Reduced single point of failure risk
-
-## 📡 API Endpoints
-
-### Local Server API
-
-- `GET /` - Health check
-- `GET /api/v1/status` - Get server status
-- `POST /api/v1/compute_embedding` - Compute embedding share
-- `POST /api/v1/test_embedding` - Test embedding computation
-
-### Cloud Server API
-
-- `GET /` - Health check
-- `GET /api/v1/status` - Get server status
-- `POST /api/v1/compute_embedding` - Compute embedding share
-- `POST /api/v1/merge_embeddings` - Merge embedding results
-- `POST /api/v1/inference` - Execute complete inference
-- `POST /api/v1/test_inference` - Test inference functionality
-
-## 💻 Usage Examples
-
-### Basic Usage
-
-```python
-from client import DistributedInferenceClient
-
-# Create client
-client = DistributedInferenceClient()
-
-# Check server status
-status = client.check_servers()
-print(f"Local server: {'Online' if status['local'] else 'Offline'}")
-print(f"Cloud server: {'Online' if status['cloud'] else 'Offline'}")
-
-# Perform inference
-result = client.perform_inference("This is a test text")
-print(f"Inference result: {result['result']}")
-```
-
-### Direct API Call
-
-```python
-import requests
-
-# Send inference request
-response = requests.post(
-    "http://localhost:8002/api/v1/inference",
-    json={
-        "text": "Text to infer",
-        "request_id": "unique_request_id"
-    }
-)
-
-if response.status_code == 200:
-    result = response.json()
-    print(f"Inference result: {result['result']}")
-else:
-    print(f"Inference failed: {response.text}")
-```
-
-## 🧪 Testing
-
-### Run All Tests
-
-```bash
-python test_system.py
-```
-
-### Test Components
-
-- Secret sharing protocol functionality
-- Server health status
-- Embedding computation
-- Distributed inference
-- Server status monitoring
-
-## 🔍 Monitoring
-
-### Server Status
-
-Access server status via API endpoints:
-- Local server: `http://localhost:8001/api/v1/status`
-- Cloud server: `http://localhost:8002/api/v1/status`
-
-### Logs
-
-System provides detailed logging including:
-- Server startup status
-- Request processing
-- Error and exception information
-- Performance statistics
-
-## 🛠️ Troubleshooting
-
-### Common Issues
-
-1. **Server Startup Failure**
-   - Check if ports are occupied
-   - Verify dependencies are correctly installed
-   - Review error logs
-
-2. **Model Loading Failure**
-   - Check network connection
-   - Verify model names are correct
-   - System will automatically use simplified models as fallback
-
-3. **Inference Request Timeout**
-   - Increase timeout configuration
-   - Check server load
-   - Ensure stable network connection
-
-### Performance Optimization
-
-1. **Model Caching**
-   - Models are automatically cached in `model_cache` directory
-   - Faster startup after first load
-
-2. **Concurrent Processing**
-   - Servers support concurrent requests
-   - Asynchronous processing improves performance
-
-3. **Resource Monitoring**
-   - Monitor server status via `/api/v1/status` endpoint
-   - Track active requests and system load
-
-## 🔧 Development
-
-### Adding New Models
-
-1. Modify model classes in `model_utils.py`
-2. Update model names in configuration
-3. Test new model functionality
-
-### Customizing Secret Sharing Protocol
-
-1. Inherit from `SecretSharing` class
-2. Implement custom splitting and reconstruction methods
-3. Update related server code
-
-### Adding New Computation Nodes
-
-1. Create new server scripts
-2. Implement corresponding API endpoints
-3. Update client and configuration
-
-## 📁 Project Structure
-
-```
-SSLLM/
-├── README.md              # This file
-├── requirements.txt       # Python dependencies
-├── config.py             # System configuration
-├── secret_sharing.py     # Secret sharing protocol implementation
-├── model_utils.py        # Model utilities and inference engine
-├── local_server.py       # Local computation server
-├── cloud_server.py       # Cloud computation server
-├── client.py             # Client interface
-├── start_system.py       # System startup script
-├── test_system.py        # System testing script
-├── demo.py               # Demonstration script
-└── USAGE.md              # Detailed usage documentation
-```
-
-## 🤝 Contributing
-
-We welcome contributions! Please feel free to submit issues and pull requests to improve this project.
-
-### Development Setup
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
-## 🙏 Acknowledgments
-
-- Shamir's Secret Sharing algorithm
-- FastAPI for web framework
-- Transformers library for model support
-- Cryptography library for security features
-
-## 📞 Support
-
-For questions, issues, or contributions, please:
-
-1. Check the documentation in `USAGE.md`
-2. Review existing issues
-3. Create a new issue with detailed information
-4. Contact the maintainers
-
----
-
-**Note**: This is a research prototype. For production use, additional security audits and optimizations are recommended. 
+Two non-colluding parties evaluate a 2-layer integer network on additive secret shares. Products use Beaver triples. Square is the nonlinearity, because a comparison protocol for ReLU is out of scope. Run `python demo.py` and `python test_ssnn.py`.
