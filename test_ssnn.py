@@ -1,4 +1,4 @@
-"""核对秘密分享、Beaver 乘法和两层前向。"""
+"""Checks for secret sharing, Beaver multiplication, and the two-layer forward pass."""
 
 import numpy as np
 
