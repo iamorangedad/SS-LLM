@@ -6,6 +6,8 @@ User documentation: README.md (English, primary) and README_CH.md.
 Threat model
     Semi-honest and non-colluding. Each party holds only its own share and
     sees the Beaver masks that multiplication opens.
+    Those mask shares are the only values placed on the simulated link in
+    comm.py. The link is in-process; it is not a socket and it is not encrypted.
     A trusted dealer samples those masks beforehand and does not take part
     in inference.
     Shares are uniform in the prime field 2^61-1, so one share is
@@ -26,6 +28,8 @@ the result matches an ordinary integer forward pass.
 from dataclasses import dataclass
 
 import numpy as np
+
+from comm import PARTY_0, PARTY_1, Channel, deserialize, serialize
 
 PRIME = 2**61 - 1
 
@@ -100,11 +104,50 @@ def _party_product(opened_e, opened_f, a, b, c, add_cross: bool) -> np.ndarray:
     return result
 
 
-def multiply(left: Shared, right: Shared, dealer: Dealer) -> Shared:
-    """Beaver multiplication. The only values exchanged are mask shares, opened as e and f."""
+def _exchange_mask(
+    channel: Channel, mask0: np.ndarray, mask1: np.ndarray, tag: str
+) -> np.ndarray:
+    """Each party sends its mask share and opens the mask from what it receives.
+
+    Party 0 adds its local share to the payload addressed to PARTY_0.
+    Party 1 does the same with the payload addressed to PARTY_1.
+    The secret, the weights, and the other party's raw share are not sent.
+    """
+
+    channel.send(PARTY_0, PARTY_1, serialize(mask0), tag)
+    channel.send(PARTY_1, PARTY_0, serialize(mask1), tag)
+    to_party0 = channel.receive(PARTY_0)
+    to_party1 = channel.receive(PARTY_1)
+    if to_party0.src != PARTY_1 or to_party0.tag != tag:
+        raise RuntimeError("party 0 received an unexpected mask share")
+    if to_party1.src != PARTY_0 or to_party1.tag != tag:
+        raise RuntimeError("party 1 received an unexpected mask share")
+    peer0 = deserialize(to_party0.payload, np.shape(mask0))
+    peer1 = deserialize(to_party1.payload, np.shape(mask1))
+    opened0 = (np.asarray(mask0, dtype=object) + peer0) % PRIME
+    opened1 = (np.asarray(mask1, dtype=object) + peer1) % PRIME
+    if [int(v) for v in np.asarray(opened0, dtype=object).flat] != [
+        int(v) for v in np.asarray(opened1, dtype=object).flat
+    ]:
+        raise RuntimeError("the two parties opened different masks")
+    return opened0
+
+
+def multiply(
+    left: Shared, right: Shared, dealer: Dealer, channel: Channel | None = None
+) -> Shared:
+    """Beaver multiplication.
+
+    The only cross-party messages are the mask shares of e and f. Each party
+    sends its share to the other address and reconstructs the opened mask
+    from its local share plus the share it receives. A fresh in-process link
+    is used when `channel` is omitted.
+    """
 
     if left.shape != right.shape:
         raise ValueError("multiplied shares must have the same shape")
+    if channel is None:
+        channel = Channel()
 
     shape = left.shape
     raw_a = dealer._uniform(shape)
@@ -115,12 +158,18 @@ def multiply(left: Shared, right: Shared, dealer: Dealer) -> Shared:
     triple_c = dealer.share(raw_c)
     dealer.multiplications += int(np.prod(shape, dtype=int))
 
-    opened_e = (
-        _party_mask(left.s0, triple_a.s0) + _party_mask(left.s1, triple_a.s1)
-    ) % PRIME
-    opened_f = (
-        _party_mask(right.s0, triple_b.s0) + _party_mask(right.s1, triple_b.s1)
-    ) % PRIME
+    opened_e = _exchange_mask(
+        channel,
+        _party_mask(left.s0, triple_a.s0),
+        _party_mask(left.s1, triple_a.s1),
+        "e",
+    )
+    opened_f = _exchange_mask(
+        channel,
+        _party_mask(right.s0, triple_b.s0),
+        _party_mask(right.s1, triple_b.s1),
+        "f",
+    )
     product0 = _party_product(
         opened_e, opened_f, triple_a.s0, triple_b.s0, triple_c.s0, add_cross=True
     )
@@ -136,11 +185,13 @@ def add(left: Shared, right: Shared) -> Shared:
     return Shared((left.s0 + right.s0) % PRIME, (left.s1 + right.s1) % PRIME)
 
 
-def square(value: Shared, dealer: Dealer) -> Shared:
-    return multiply(value, value, dealer)
+def square(value: Shared, dealer: Dealer, channel: Channel | None = None) -> Shared:
+    return multiply(value, value, dealer, channel)
 
 
-def matvec(weight: Shared, vector: Shared, dealer: Dealer) -> Shared:
+def matvec(
+    weight: Shared, vector: Shared, dealer: Dealer, channel: Channel | None = None
+) -> Shared:
     """Matrix-vector product on shares. Both the matrix and the vector are shared."""
 
     if weight.s0.ndim != 2 or vector.s0.ndim != 1:
@@ -153,7 +204,7 @@ def matvec(weight: Shared, vector: Shared, dealer: Dealer) -> Shared:
         np.broadcast_to(vector.s0, (rows, cols)),
         np.broadcast_to(vector.s1, (rows, cols)),
     )
-    products = multiply(weight, expanded, dealer)
+    products = multiply(weight, expanded, dealer, channel)
     summed0 = _sum_rows(products.s0)
     summed1 = _sum_rows(products.s1)
     return Shared(summed0, summed1)
@@ -176,12 +227,20 @@ def secure_forward(
     weight2: Shared,
     bias2: Shared,
     dealer: Dealer,
+    channel: Channel | None = None,
 ) -> Shared:
-    """Evaluate the two-layer network on shares without opening intermediates."""
+    """Evaluate the two-layer network on shares without opening intermediates.
 
-    hidden_input = add(matvec(weight1, features, dealer), bias1)
-    hidden = square(hidden_input, dealer)
-    return add(matvec(weight2, hidden, dealer), bias2)
+    Beaver openings travel on `channel`. When it is omitted, one fresh
+    in-process link carries every mask share in this forward pass.
+    """
+
+    if channel is None:
+        channel = Channel()
+
+    hidden_input = add(matvec(weight1, features, dealer, channel), bias1)
+    hidden = square(hidden_input, dealer, channel)
+    return add(matvec(weight2, hidden, dealer, channel), bias2)
 
 
 def forward(features, weight1, bias1, weight2, bias2) -> np.ndarray:

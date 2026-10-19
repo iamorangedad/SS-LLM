@@ -4,6 +4,7 @@ import sys
 
 import numpy as np
 
+from comm import Channel, format_trace
 from ssnn import Dealer, example, forward, reveal, secure_forward, to_signed
 
 
@@ -31,8 +32,15 @@ def run_example() -> None:
     plaintext = forward(
         network["x"], network["w1"], network["b1"], network["w2"], network["b2"]
     )
+    channel = Channel()
     secure = secure_forward(
-        shared["x"], shared["w1"], shared["b1"], shared["w2"], shared["b2"], dealer
+        shared["x"],
+        shared["w1"],
+        shared["b1"],
+        shared["w2"],
+        shared["b2"],
+        dealer,
+        channel,
     )
     opened = reveal(secure)
 
@@ -45,6 +53,8 @@ def run_example() -> None:
     show("party 0 output share", [to_signed(v) for v in secure.s0])
     show("client opens both output shares", opened)
     print(f"multiplications: {dealer.multiplications}")
+    print()
+    print(format_trace(channel))
 
     if [int(v) for v in opened] != [int(v) for v in plaintext]:
         print("secure forward does not match plaintext", file=sys.stderr)
